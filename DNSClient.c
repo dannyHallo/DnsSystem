@@ -25,14 +25,56 @@ void DNSRequest(const uint16_t queryType, const char *queryContent) {
   printInHex(sendBuffer, sendBufferUsed);
 }
 
+void handleReply() {
+  struct DNSHeader dnsHeaderParsed;
+  struct DNSQuery dnsQueryParsed;
+  struct DNSRR dnsRRParsed;
+  char domainNameBuffer1[100];
+  char domainNameBuffer2[100];
+  char resourceDataBuffer[100];
+
+  parseDNSHeader(&dnsHeaderParsed);
+  int pointerOffset = parseDNSQuery(&dnsQueryParsed, domainNameBuffer1, sizeof(domainNameBuffer1));
+
+  if (dnsHeaderParsed.answerCount > 0) {
+    printf("\nAuthoritative answer: \n");
+
+    int i;
+    for (i = 0; i < dnsHeaderParsed.answerCount + dnsHeaderParsed.additionalCount; ++i) {
+      pointerOffset = parseDNSRR(&dnsRRParsed, pointerOffset, domainNameBuffer2, sizeof(domainNameBuffer2), resourceDataBuffer,
+                                 sizeof(resourceDataBuffer));
+
+      char answerNotice[50];
+      if (dnsRRParsed.qtype == QUERY_TYPE_A) {
+        strcpy(answerNotice, "Address");
+      } else if (dnsQueryParsed.qtype == QUERY_TYPE_CNAME) {
+        strcpy(answerNotice, "Canonical name");
+      } else if (dnsQueryParsed.qtype == QUERY_TYPE_MX) {
+        strcpy(answerNotice, "Mail exchange");
+      } else if (dnsQueryParsed.qtype == QUERY_TYPE_PTR) {
+        strcpy(answerNotice, "Name server");
+      } else {
+        strcpy(answerNotice, "Unknown Type");
+      }
+
+      printf("Name: %s\n", dnsRRParsed.domainName);
+      printf("%s: %s\n\n", answerNotice, dnsRRParsed.resourceData);
+    }
+    return;
+  }
+
+  { printf("\nNo data found!\n\n"); }
+}
+
 int main(int argc, char *argv[]) {
   udpSock = createUDPSocket();
 
   // set the default query type to A
   uint16_t queryType = QUERY_TYPE_A;
 
+  printf("DNSClient Started\n");
   for (;;) {
-  nextTry:
+  nextTry : {
     char queryName[100];
     memset(queryName, 0, sizeof(queryName));
 
@@ -120,10 +162,12 @@ int main(int argc, char *argv[]) {
       }
       *(lbp++) = tolower(*ptr);
     }
+
+    printf("Waiting for reply...\n");
+    receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
+    printf("Received: %s\n", sendBuffer);
+    handleReply();
   }
-
-  receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
-  printf("Received: %s\n", sendBuffer);
-
+  }
   close(udpSock);
 }

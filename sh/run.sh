@@ -6,10 +6,23 @@ case "$1" in
         ./LocalDNSServer.out
         ;;
     3)
-        ./DNSServer.out
+        ./DNSServer.out rr3.txt 127.0.0.3
         ;;
+    4)
+        ./DNSServer.out rr4.txt 127.0.0.4
+        ;;
+    5)
+        ./DNSServer.out rr5.txt 127.0.0.5
+        ;;
+    6)
+        ./DNSServer.out rr6.txt 127.0.0.6
+        ;;
+    7)
+        ./DNSServer.out rr7.txt 127.0.0.7
+        ;;
+    
     *)
-        echo "Usage: $0 {1|2|3}"
+        echo "Usage: $0 {1|2|3|4|5|6|7}"
         exit 1
         ;;
 esac

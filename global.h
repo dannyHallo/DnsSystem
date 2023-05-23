@@ -70,6 +70,7 @@ const int RR_TYPE  = 3;
 const int RR_RDATA = 4;
 
 char sendBuffer[SEND_BUFFER_SIZE];
+int sendBufferUsed = 0;
 
 int createUDPSocket() {
   int sock;
@@ -138,7 +139,7 @@ void sendTCP(const int socket, const char *bufferToSend, const int bufferSize) {
 void receiveUDP(const int socket, char *bufferToReceive, const int bufferSize, int *receivedBufferSize,
                 char *receivedFromAddressBuffer, const int receivedFromAddressBufferSize, unsigned short *receivedFromPort) {
   if (bufferToReceive == NULL) {
-    printf("Error: bufferToReceive is NULL\n");
+    printf("Error: bufferToReceive cannot be NULL!\n");
     return;
   }
   memset(bufferToReceive, 0, bufferSize);
@@ -149,11 +150,9 @@ void receiveUDP(const int socket, char *bufferToReceive, const int bufferSize, i
   struct sockaddr_in receivedFromAddr;
   unsigned int senderAddrSize = sizeof(receivedFromAddr);
 
-  if (receivedBufferSize == NULL) {
-    recvfrom(socket, bufferToReceive, bufferSize, 0, (struct sockaddr *)&receivedFromAddr, &senderAddrSize);
-  } else {
-    *receivedBufferSize = recvfrom(socket, bufferToReceive, bufferSize, 0, (struct sockaddr *)&receivedFromAddr, &senderAddrSize);
-  }
+  sendBufferUsed = recvfrom(socket, bufferToReceive, bufferSize, 0, (struct sockaddr *)&receivedFromAddr, &senderAddrSize);
+  if (receivedBufferSize != NULL)
+    *receivedBufferSize = sendBufferUsed;
 
   if (receivedFromAddressBuffer != NULL)
     strcpy(receivedFromAddressBuffer, inet_ntoa(receivedFromAddr.sin_addr));
@@ -161,9 +160,34 @@ void receiveUDP(const int socket, char *bufferToReceive, const int bufferSize, i
     *receivedFromPort = ntohs(receivedFromAddr.sin_port);
 }
 
-void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize) {
+// TODO: update sendBufferUsed
+// void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize) {
+//   memset(bufferToReceive, 0, bufferSize);
+//   recv(socket, bufferToReceive, bufferSize, 0);
+// }
+
+void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize, int *receivedBufferSize,
+                char *receivedFromAddressBuffer, const int receivedFromAddressBufferSize, unsigned short *receivedFromPort) {
+  if (bufferToReceive == NULL) {
+    printf("Error: bufferToReceive cannot be NULL!\n");
+    return;
+  }
   memset(bufferToReceive, 0, bufferSize);
-  recv(socket, bufferToReceive, bufferSize, 0);
+
+  if (receivedFromAddressBuffer != NULL)
+    memset(receivedFromAddressBuffer, 0, receivedFromAddressBufferSize);
+
+  struct sockaddr_in receivedFromAddr;
+  unsigned int senderAddrSize = sizeof(receivedFromAddr);
+
+  sendBufferUsed = recvfrom(socket, bufferToReceive, bufferSize, 0, (struct sockaddr *)&receivedFromAddr, &senderAddrSize);
+  if (receivedBufferSize != NULL)
+    *receivedBufferSize = sendBufferUsed;
+
+  if (receivedFromAddressBuffer != NULL)
+    strcpy(receivedFromAddressBuffer, inet_ntoa(receivedFromAddr.sin_addr));
+  if (receivedFromPort != NULL)
+    *receivedFromPort = ntohs(receivedFromAddr.sin_port);
 }
 
 // --------------------------------------------------------------------------------------------
@@ -199,7 +223,6 @@ void parseResourceRecord(const char *lineBuffer, const int resourceRecordType, c
 int domainContains(const char *rrOwner, const char *domainNameQueried);
 int domainMatches(const char *rrOwner, const char *domainNameQueried);
 
-int sendBufferUsed    = 0;
 unsigned int seedUsed = 0;
 
 // local function: constructs the ID field inside a DNS header with a random number
