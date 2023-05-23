@@ -17,11 +17,11 @@ int main() {
     unsigned short receivedFromPort;
 
     printf("Testing UDP...\n");
-    receiveUDP(udpSock, receivedBuffer, RECEIVED_BUFFER_SIZE, &receivedBufferSize, receivedFromAddressBuffer,
+    receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, &receivedBufferSize, receivedFromAddressBuffer,
                sizeof(receivedFromAddressBuffer), &receivedFromPort);
     printf("Handling client %s\n", receivedFromAddressBuffer);
-    sendUDP(udpSock, receivedFromAddressBuffer, receivedFromPort, receivedBuffer, receivedBufferSize);
-    printf("Sent back to client %s\n", receivedBuffer);
+    sendUDP(udpSock, receivedFromAddressBuffer, receivedFromPort, sendBuffer, receivedBufferSize);
+    printf("Sent back to client %s\n", sendBuffer);
 
     printf("Testing TCP...\n");
     char bufferToSend[] = "hello, this is a Local DNS server, also a TCP client!\n";
@@ -29,8 +29,8 @@ int main() {
     connectSocket(tcpSock, "127.0.0.3", DNS_PORT);
     sendTCP(tcpSock, bufferToSend, sizeof(bufferToSend));
     printf("Sent to DNSClient.\n");
-    receiveTCP(tcpSock, receivedBuffer, RECEIVED_BUFFER_SIZE);
-    printf("Received: %s\n", receivedBuffer);
+    receiveTCP(tcpSock, sendBuffer, SEND_BUFFER_SIZE);
+    printf("Received: %s\n", sendBuffer);
   }
   close(udpSock);
   close(tcpSock);

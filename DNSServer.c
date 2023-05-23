@@ -13,8 +13,8 @@ int main() {
     int clientInfoSize = sizeof(clientInfo);
 
     int forClientSockfd = accept(tcpSock, (struct sockaddr *)&clientInfo, &clientInfoSize);
-    receiveTCP(forClientSockfd, receivedBuffer, RECEIVED_BUFFER_SIZE);
-    printf("Received: %s\n", receivedBuffer);
+    receiveTCP(forClientSockfd, sendBuffer, SEND_BUFFER_SIZE);
+    printf("Received: %s\n", sendBuffer);
     char message[] = "hello, I am a DNS server!\n";
     send(forClientSockfd, message, sizeof(message), 0);
   }

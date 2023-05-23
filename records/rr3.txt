@@ -1,0 +1,6 @@
+uk. 86400 IN NS uk-hk.net.
+hk. 86400 IN NS uk-hk.net.
+com. 86400 IN NS com-org.net.
+org. 86400 IN NS com-org.net.
+uk-hk.net. 86400 IN A 127.0.0.4
+com-org.net. 86400 IN A 127.0.0.5
