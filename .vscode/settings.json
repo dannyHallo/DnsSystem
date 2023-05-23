@@ -1,0 +1,10 @@
+{
+  "C_Cpp.clang_format_fallbackStyle": "{BasedOnStyle: LLVM, AlignConsecutiveAssignments: Consecutive, ColumnLimit: 130}",
+  "files.associations": {
+    "*.cjson": "jsonc",
+    "*.wxss": "css",
+    "*.wxs": "javascript",
+    "winsock2.h": "c",
+    "global.h": "c"
+  }
+}
