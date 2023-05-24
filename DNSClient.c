@@ -1,3 +1,6 @@
+// TODO: capture of TCP packets in wireshark
+// TODO: format of MX records (all answers first, then all additionals)
+
 #include "global.h"
 
 const char *ipAddress = "127.0.0.1";
@@ -36,6 +39,7 @@ void handleReply() {
   parseDNSHeader(&dnsHeaderParsed);
   int pointerOffset = parseDNSQuery(&dnsQueryParsed, domainNameBuffer1, sizeof(domainNameBuffer1));
 
+  // answer found
   if (dnsHeaderParsed.answerCount > 0) {
     printf("\nAuthoritative answer: \n");
 
@@ -62,8 +66,11 @@ void handleReply() {
     }
     return;
   }
-
-  { printf("\nNo data found!\n\n"); }
+  // no answer found
+  else {
+    printf("\nNo data found!\n\n");
+    return;
+  }
 }
 
 int main(int argc, char *argv[]) {
@@ -101,7 +108,7 @@ int main(int argc, char *argv[]) {
           DNSRequest(queryType, queryName);
           break;
         }
-        // set query
+        // set query type
         else if (termCount == 2) {
           // check for standard format
           const char *standardFormat = "type=";
@@ -134,8 +141,7 @@ int main(int argc, char *argv[]) {
           } else {
             printf("unknown query type: %s\n", queryTypeBuffer);
           }
-
-          break;
+          goto nextTry;
         } else {
           printf("Too much parameters!\n");
           goto nextTry;
@@ -163,9 +169,11 @@ int main(int argc, char *argv[]) {
       *(lbp++) = tolower(*ptr);
     }
 
-    printf("Waiting for reply...\n");
+    printf("Waiting for Local DNS Server...\n");
     receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
-    printf("Received: %s\n", sendBuffer);
+    printf("Received UDP packet:\n");
+    printInHex(sendBuffer, sendBufferUsed);
+
     handleReply();
   }
   }

@@ -16,6 +16,10 @@ void handleUDP() {
   struct DNSHeader dnsHeaderParsed;
   struct DNSQuery dnsQueryParsed;
   char domainNameBuffer[100];
+
+  printf("Received UDP packet:\n");
+  printInHex(sendBuffer, sendBufferUsed);
+
   parseDNSHeader(&dnsHeaderParsed);
   parseDNSQuery(&dnsQueryParsed, domainNameBuffer, sizeof(domainNameBuffer));
 
@@ -126,10 +130,11 @@ void handleUDP() {
 void handleTCP() {
   for (;;) {
     receiveTCP(tcpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
-    // close connection
+    // reset connection
     close(tcpSock);
     tcpSock = createTCPSocket();
 
+    printf("Received TCP packet:\n");
     printInHex(sendBuffer, sendBufferUsed);
 
     struct DNSHeader dnsHeaderParsed;
@@ -168,10 +173,6 @@ void handleTCP() {
     // answer DNS client
     if (dnsHeaderParsed.answerCount > 0) {
       printf("Answering DNS client\n");
-
-      printInHex(sendBuffer, sendBufferUsed);
-      printf("\n");
-      printInHex(sendBuffer, SEND_BUFFER_SIZE);
 
       struct DNSHeader dnsHeader;
       struct DNSQuery dnsQuery;
@@ -219,6 +220,24 @@ void handleTCP() {
       sendUDP(udpSock, clientIpAddress, clientPort, sendBuffer, sendBufferUsed);
       return;
     }
+    // no next hop or answer
+    else {
+      {
+        struct DNSRR dnsRRParsed;
+        struct DNSHeader dnsHeader;
+        struct DNSQuery dnsQuery;
+        char encodedDomainNameBuffer[100];
+
+        makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, TRUE, TRUE, 1, 0, 0, 0);
+        makeQuery(&dnsQuery, dnsQueryParsed.domainName, dnsQueryParsed.qtype, dnsQueryParsed.qclass, encodedDomainNameBuffer,
+                  sizeof(encodedDomainNameBuffer));
+        makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
+
+        // send to client
+        sendUDP(udpSock, clientIpAddress, clientPort, sendBuffer, sendBufferUsed);
+        return;
+      }
+    }
   }
 }
 
@@ -236,13 +255,10 @@ int main() {
     receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, clientIpAddress, sizeof(clientIpAddress), &clientPort);
     printf("UDP packet received from %s:%d\n", clientIpAddress, clientPort);
 
-    printf("Handling queries...\n");
     handleUDP();
-    printf("Queries handled\n");
 
-    printf("Waiting for TCP...\n");
+    printf("Waiting for dns server...\n");
     handleTCP();
-    printf("TCP handled\n");
   }
   close(udpSock);
   close(tcpSock);

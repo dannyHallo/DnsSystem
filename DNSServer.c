@@ -46,7 +46,11 @@ void handleRequest() {
     struct DNSQuery dnsQuery;
     char encodedDomainNameBuffer1[100];
 
-    makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, FALSE, FALSE, 1, directMatchesFound, 0, directMatchesFound);
+    if (dnsQueryParsed.qtype == QUERY_TYPE_MX)
+      makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, FALSE, FALSE, 1, directMatchesFound, 0, directMatchesFound);
+    else
+      makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, FALSE, FALSE, 1, directMatchesFound, 0, 0);
+      
     makeQuery(&dnsQuery, dnsQueryParsed.domainName, dnsQueryParsed.qtype, dnsQueryParsed.qclass, encodedDomainNameBuffer1,
               sizeof(encodedDomainNameBuffer1));
     makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
@@ -206,6 +210,10 @@ int main(int argc, char *argv[]) {
 
     forClientSock = accept(tcpSock, (struct sockaddr *)&clientInfo, &clientInfoSize);
     receiveTCP(forClientSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
+
+    printf("Received TCP packet:\n");
+    printInHex(sendBuffer, sendBufferUsed);
+
     handleRequest();
     close(forClientSock);
   }
