@@ -3,6 +3,7 @@
 char ipAddress[50];
 char fileName[50];
 int forClientSock;
+int tcpSock;
 
 void handleRequest() {
   struct DNSHeader dnsHeaderParsed;
@@ -190,19 +191,23 @@ int main(int argc, char *argv[]) {
   strcpy(fileName, argv[1]);
   strcpy(ipAddress, argv[2]);
 
-  int tcpSock = createTCPSocket();          // this is a client for TCP traffics
+  checkFileExistance(fileName);
+
+  tcpSock = createTCPSocket();              // this is a client for TCP traffics
   bindSocket(tcpSock, ipAddress, DNS_PORT); // since this is a server, we need to bind it to an local address and port
   listen(tcpSock, 5);                       // listen for incoming connections
   printf("DNS Server Started\n");
 
   for (;;) {
+    printf("Waiting for incoming connections...\n");
+
     struct sockaddr_in clientInfo;
     int clientInfoSize = sizeof(clientInfo);
 
     forClientSock = accept(tcpSock, (struct sockaddr *)&clientInfo, &clientInfoSize);
-
     receiveTCP(forClientSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
     handleRequest();
+    close(forClientSock);
   }
   close(tcpSock);
 }

@@ -5,6 +5,7 @@
     "*.wxss": "css",
     "*.wxs": "javascript",
     "winsock2.h": "c",
-    "global.h": "c"
+    "global.h": "c",
+    "stdio.h": "c"
   }
 }

@@ -20,7 +20,7 @@
 #define FALSE 0
 #define TRUE 1
 
-#define PATH_OF_RR "./records/"
+#define PATH_OF_RR "records/"
 
 // the following structs announced are of padding 1
 #pragma pack(push, 1)
@@ -46,12 +46,6 @@ struct DNSRR {
   uint32_t ttl;
   uint16_t resourceDataLength;
   char *resourceData;
-};
-
-struct SendBufferWrapper {
-  const int bufferSizeTotal;
-  int bufferSizeUsed;
-  char *sendBuffer;
 };
 #pragma pack(pop)
 
@@ -217,6 +211,7 @@ int parseDNSHeader(struct DNSHeader *dnsHeader);
 int parseDNSQuery(struct DNSQuery *dnsQuery, char *domainNameBuffer, const int domainNameBufferSize);
 int parseDNSRR(struct DNSRR *dnsRR, const int pointerOffset, char *domainNameBuffer, const int domainNameBufferSize,
                char *resourceDataBuffer, const int resourceDataBufferSize);
+void checkFileExistance(const char *fileName);
 int readLine(const char *fileName, char *lineBuffer, const int lineBufferSize, const int lineNum);
 void parseResourceRecord(const char *lineBuffer, const int resourceRecordType, char *rrBuffer, const int rrBufferSize);
 
@@ -661,7 +656,16 @@ int parseDNSRR(struct DNSRR *dnsRR, const int pointerOffset, char *domainNameBuf
   return ptr - sendBuffer;
 }
 
-// returns 0 if file not found, or line content is empty (maybe out of range)
+void checkFileExistance(const char *fileName) {
+  char lineBufferTmp[100];
+  // check if file exists
+  if (readLine(fileName, lineBufferTmp, sizeof(lineBufferTmp), 0) == -1) {
+    printf("Error: File %s not found!\n", fileName);
+    return;
+  }
+}
+
+// returns -1 if file not found,returns 0 if line content is empty (maybe out of range)
 int readLine(const char *fileName, char *lineBuffer, const int lineBufferSize, const int lineNum) {
   char pathToFile[100];
   memset(lineBuffer, 0, lineBufferSize);
@@ -675,7 +679,7 @@ int readLine(const char *fileName, char *lineBuffer, const int lineBufferSize, c
 
   // indecates the filePath is invalid
   if (!fp)
-    return 0;
+    return -1;
 
   int lineCount     = 0;
   int lineCursorPos = 0;
@@ -689,8 +693,12 @@ int readLine(const char *fileName, char *lineBuffer, const int lineBufferSize, c
         break;
     }
 
-    else if (lineCount == lineNum)
+    else if (lineCount == lineNum) {
+      // avoid carrage return
+      if (c == '\r')
+        continue;
       lineBuffer[lineCursorPos++] = c;
+    }
   }
 
   // places unfilled specifically are just null terminators
@@ -728,8 +736,9 @@ int domainContains(const char *rrOwner, const char *domainNameQueried) {
     p1--;
 
   // when rrOwner == ".", it matches all
-  if (p1 < rrOwner)
+  if (p1 < rrOwner) {
     return 1;
+  }
 
   while (*p2) {
     p2++;
@@ -757,15 +766,17 @@ int domainMatches(const char *rrOwner, const char *domainNameQueried) {
     p1++;
   }
   p1--;
-  if (*p1 == '.')
+  if (*p1 == '.') {
     p1--;
+  }
 
   while (*p2) {
     p2++;
   }
   p2--;
-  if (*p2 == '.')
+  if (*p2 == '.') {
     p2--;
+  }
 
   // now p1 and p2 marks the end char of each buffer
   while (p1 != rrOwner - 1) {
@@ -776,8 +787,8 @@ int domainMatches(const char *rrOwner, const char *domainNameQueried) {
     p2--;
   }
   // two domain names are of different lengths
-  if (p2 != domainNameQueried - 1)
+  if (p2 != domainNameQueried - 1) {
     return 0;
-
+  }
   return 1;
 }

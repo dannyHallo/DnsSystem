@@ -22,7 +22,7 @@ void DNSRequest(const uint16_t queryType, const char *queryContent) {
   // send packet to local DNS server
   sendUDP(udpSock, localDNSServerAddress, DNS_PORT, sendBuffer, sendBufferUsed);
   printf("DNS query created and sent to LocalDNSServer.\n");
-  printInHex(sendBuffer, sendBufferUsed);
+  // printInHex(sendBuffer, sendBufferUsed);
 }
 
 void handleReply() {
