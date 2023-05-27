@@ -1,3 +1,5 @@
 hku.hk. 86400 IN A 147.8.2.58
+hku-nsp1.hku.hk. 86400 IN A 147.8.145.51
+hku-nsp2.hku.hk. 86400 IN A 147.8.145.52
 hku.hk. 86400 IN MX hku-nsp1.hku.hk.
 hku.hk. 86400 IN MX hku-nsp2.hku.hk.

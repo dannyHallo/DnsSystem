@@ -1,3 +1,5 @@
 qmul.ac.uk. 86400 IN A 161.23.16.98
 qmul.ac.uk. 86400 IN A 161.23.64.98
+qmul-ac-uk.mail.protection.outlook.com. 86400 IN A 104.47.0.36
+qmul-ac-uk.mail.protection.outlook.com. 86400 IN A 104.47.1.36
 qmul.ac.uk. 86400 IN MX qmul-ac-uk.mail.protection.outlook.com.

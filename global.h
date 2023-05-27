@@ -14,7 +14,7 @@
 // #include <WinSock2.h> // windows alternative to sys/socket.h
 #endif
 
-#define SEND_BUFFER_SIZE 512
+#define SEND_BUFFER_SIZE 2048
 #define DNS_PORT 53
 
 #define FALSE 0
@@ -64,7 +64,10 @@ const int RR_TYPE  = 3;
 const int RR_RDATA = 4;
 
 char sendBuffer[SEND_BUFFER_SIZE];
+char sendBufferTmp[SEND_BUFFER_SIZE];
 int sendBufferUsed = 0;
+
+void printInHex(const void *ptr, size_t size);
 
 int createUDPSocket() {
   int sock;
@@ -128,7 +131,27 @@ void sendUDP(const int socket, const char *sendToAddress, const unsigned short s
   sendto(socket, bufferToSend, bufferSize, 0, (struct sockaddr *)&sendToAddr, sizeof(sendToAddr));
 }
 
-void sendTCP(const int socket, const char *bufferToSend, const int bufferSize) { send(socket, bufferToSend, bufferSize, 0); }
+void sendTCP(const int socket, const char *bufferToSend, const int sendSize) {
+  // clear sendBufferTmp
+  memset(sendBufferTmp, 0, SEND_BUFFER_SIZE);
+
+  // first two bytes of sendBufferTmp is the tcp packet size
+  uint16_t tcpPacketSize = (uint16_t)sendSize;
+  tcpPacketSize          = htons(tcpPacketSize);
+
+  char *ptr = sendBufferTmp;
+  memcpy(ptr, &tcpPacketSize, 2);
+  ptr += 2;
+
+  // move bufferToSend to sendBufferTmp
+  memcpy(ptr, bufferToSend, sendSize);
+
+  // print sendBufferTmp
+  printf("packing up sending buffer: ");
+  printInHex(sendBufferTmp, sendSize + 2);
+
+  send(socket, sendBufferTmp, sendSize + 2, 0);
+}
 
 void receiveUDP(const int socket, char *bufferToReceive, const int bufferSize, int *receivedBufferSize,
                 char *receivedFromAddressBuffer, const int receivedFromAddressBufferSize, unsigned short *receivedFromPort) {
@@ -154,12 +177,7 @@ void receiveUDP(const int socket, char *bufferToReceive, const int bufferSize, i
     *receivedFromPort = ntohs(receivedFromAddr.sin_port);
 }
 
-// TODO: update sendBufferUsed
-// void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize) {
-//   memset(bufferToReceive, 0, bufferSize);
-//   recv(socket, bufferToReceive, bufferSize, 0);
-// }
-
+// unpack the length data from the first two bytes of the received buffer
 void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize, int *receivedBufferSize,
                 char *receivedFromAddressBuffer, const int receivedFromAddressBufferSize, unsigned short *receivedFromPort) {
   if (bufferToReceive == NULL) {
@@ -167,6 +185,7 @@ void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize, i
     return;
   }
   memset(bufferToReceive, 0, bufferSize);
+  memset(sendBufferTmp, 0, SEND_BUFFER_SIZE);
 
   if (receivedFromAddressBuffer != NULL)
     memset(receivedFromAddressBuffer, 0, receivedFromAddressBufferSize);
@@ -174,9 +193,14 @@ void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize, i
   struct sockaddr_in receivedFromAddr;
   unsigned int senderAddrSize = sizeof(receivedFromAddr);
 
-  sendBufferUsed = recvfrom(socket, bufferToReceive, bufferSize, 0, (struct sockaddr *)&receivedFromAddr, &senderAddrSize);
+  sendBufferUsed = recvfrom(socket, sendBufferTmp, bufferSize, 0, (struct sockaddr *)&receivedFromAddr, &senderAddrSize) - 2;
   if (receivedBufferSize != NULL)
     *receivedBufferSize = sendBufferUsed;
+
+  memcpy(bufferToReceive, sendBufferTmp + 2, sendBufferUsed);
+
+  printf("unpacking received buffer: ");
+  printInHex(bufferToReceive, sendBufferUsed);
 
   if (receivedFromAddressBuffer != NULL)
     strcpy(receivedFromAddressBuffer, inet_ntoa(receivedFromAddr.sin_addr));
@@ -185,8 +209,6 @@ void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize, i
 }
 
 // --------------------------------------------------------------------------------------------
-
-void printInHex(const void *ptr, size_t size);
 
 uint16_t getRandomID();
 void makeHeader(struct DNSHeader *dnsHeader, uint16_t id, uint16_t isQuery, uint16_t useRecursive, uint16_t recursiveAvailable,
@@ -285,9 +307,16 @@ void makeResourceRecord(struct DNSRR *dnsRR, const char *domainName, const char 
     dnsRR->resourceDataLength = htons(encodeIP(resourceData, encodedResourceDataBuffer, encodedResourceDataBufferSize));
   }
   // cases when the bitcode represents encoded domain name
-  else if (queryType == QUERY_TYPE_CNAME || queryType == QUERY_TYPE_MX) {
+  else if (queryType == QUERY_TYPE_CNAME) {
     uint16_t resourceDataLength = encodeDomainName(resourceData, encodedResourceDataBuffer, encodedResourceDataBufferSize);
     dnsRR->resourceDataLength   = htons(resourceDataLength);
+  } else if (queryType == QUERY_TYPE_MX) {
+    uint16_t preference            = 10;
+    *(encodedResourceDataBuffer++) = (uint8_t)((preference >> 8) & 0x00ff);
+    *(encodedResourceDataBuffer++) = (uint8_t)(preference & 0x00ff);
+    uint16_t resourceDataLength =
+        2 + encodeDomainName(resourceData, encodedResourceDataBuffer, encodedResourceDataBufferSize - 2);
+    dnsRR->resourceDataLength = htons(resourceDataLength);
   } else {
     printf("Error: unsupported RR type\n");
   }
@@ -643,9 +672,16 @@ int parseDNSRR(struct DNSRR *dnsRR, const int pointerOffset, char *domainNameBuf
   }
 
   // cases when the bitcode represents encoded domain name
-  else if (dnsRR->qtype == QUERY_TYPE_CNAME || dnsRR->qtype == QUERY_TYPE_MX) {
+  else if (dnsRR->qtype == QUERY_TYPE_CNAME) {
     int cursorPos           = 0;
     uint8_t subdomainLength = 0;
+    --ptr;
+
+    ptr = decodeDomainName(ptr, resourceDataBuffer, resourceDataBufferSize);
+  } else if (dnsRR->qtype == QUERY_TYPE_MX) {
+    int cursorPos           = 0;
+    uint8_t subdomainLength = 0;
+    ptr += 2; // skip the preference field
     --ptr;
 
     ptr = decodeDomainName(ptr, resourceDataBuffer, resourceDataBufferSize);

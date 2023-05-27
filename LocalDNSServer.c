@@ -4,6 +4,7 @@
 
 const char *ipAddress = "127.0.0.2";
 const char *fileName  = "rr2.txt";
+const char *cacheFile = "cache.txt";
 
 int udpSock, tcpSock;
 char sendBuffer2[SEND_BUFFER_SIZE];
@@ -16,9 +17,6 @@ void handleUDP() {
   struct DNSHeader dnsHeaderParsed;
   struct DNSQuery dnsQueryParsed;
   char domainNameBuffer[100];
-
-  printf("Received UDP packet:\n");
-  printInHex(sendBuffer, sendBufferUsed);
 
   parseDNSHeader(&dnsHeaderParsed);
   parseDNSQuery(&dnsQueryParsed, domainNameBuffer, sizeof(domainNameBuffer));
@@ -104,8 +102,6 @@ void handleUDP() {
     printf("WARNING: NO NS RECORD FOR ROOT SERVER! CHECK CONFIG!\n");
   }
 
-  printf("Next hop address found\n");
-
   // query to another DNS server
   if (dnsHeaderParsed.answerCount == 0) {
     struct DNSHeader dnsHeader;
@@ -118,6 +114,8 @@ void handleUDP() {
               sizeof(encodedDomainNameBuffer));
     makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
   }
+
+  printf("Next hop address found\n");
 
   // connect with DNS server
   printf("Connecting to %s:%d\n", nsIpBuffer, DNS_PORT);
@@ -133,6 +131,7 @@ void handleTCP() {
     // reset connection
     close(tcpSock);
     tcpSock = createTCPSocket();
+    bindSocket(tcpSock, ipAddress, 5678); // we don't need to bind it to an local address and port for functionality
 
     printf("Received TCP packet:\n");
     printInHex(sendBuffer, sendBufferUsed);
@@ -217,6 +216,8 @@ void handleTCP() {
       }
 
       // send to client
+      printf("Sending response:\n");
+      printInHex(sendBuffer, sendBufferUsed);
       sendUDP(udpSock, clientIpAddress, clientPort, sendBuffer, sendBufferUsed);
       return;
     }
@@ -247,17 +248,16 @@ int main() {
   udpSock = createUDPSocket();              // this is a server for UDP traffics
   tcpSock = createTCPSocket();              // this is a client for TCP traffics
   bindSocket(udpSock, ipAddress, DNS_PORT); // since this is a server, we need to bind it to an local address and port
-
+  bindSocket(tcpSock, ipAddress, 5678);     // we don't need to bind it to an local address and port for functionality
   printf("Local DNS Server Started\n");
 
   for (;;) {
-    printf("Waiting for client...\n");
+    printf("\nWaiting for client...\n");
     receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, clientIpAddress, sizeof(clientIpAddress), &clientPort);
-    printf("UDP packet received from %s:%d\n", clientIpAddress, clientPort);
 
     handleUDP();
 
-    printf("Waiting for dns server...\n");
+    printf("\nWaiting for dns server...\n");
     handleTCP();
   }
   close(udpSock);

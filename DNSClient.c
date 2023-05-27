@@ -1,5 +1,6 @@
-// TODO: capture of TCP packets in wireshark
-// TODO: format of MX records (all answers first, then all additionals)
+// TODO: cache
+// TODO: PTR record
+// TODO: print trace
 
 #include "global.h"
 
@@ -24,8 +25,6 @@ void DNSRequest(const uint16_t queryType, const char *queryContent) {
 
   // send packet to local DNS server
   sendUDP(udpSock, localDNSServerAddress, DNS_PORT, sendBuffer, sendBufferUsed);
-  printf("DNS query created and sent to LocalDNSServer.\n");
-  // printInHex(sendBuffer, sendBufferUsed);
 }
 
 void handleReply() {
@@ -73,11 +72,40 @@ void handleReply() {
   }
 }
 
-int main(int argc, char *argv[]) {
-  udpSock = createUDPSocket();
+// format:
+// -type=queryType queryName
+void oneTimeQuery(int argc, char *argv[]) {
+  char *queryName = argv[2];
 
-  // set the default query type to A
-  uint16_t queryType = QUERY_TYPE_A;
+  uint16_t queryType;
+  if (!strcmp(argv[1], "-type=a")) {
+    queryType = QUERY_TYPE_A;
+  } else if (!strcmp(argv[1], "-type=mx")) {
+    queryType = QUERY_TYPE_MX;
+  } else if (!strcmp(argv[1], "-type=cname")) {
+    queryType = QUERY_TYPE_CNAME;
+  } else if (!strcmp(argv[1], "-type=ptr")) {
+    queryType = QUERY_TYPE_PTR;
+  } else {
+    printf("Invalid command found!\n");
+    printf("Usage: ./DNSClient -type=[a|mx|cname|ptr] queryName\n");
+    return;
+  }
+
+  // send query
+  DNSRequest(queryType, queryName);
+
+  // waiting for local DNS server's reply
+  receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
+  handleReply();
+  close(udpSock);
+}
+
+// format:
+// 1. set type=queryType queryName
+// 2. queryName (using previous queryType) (default queryType=MX)
+void recursiveQuery() {
+  uint16_t queryType = QUERY_TYPE_MX;
 
   printf("DNSClient Started\n");
   for (;;) {
@@ -169,13 +197,22 @@ int main(int argc, char *argv[]) {
       *(lbp++) = tolower(*ptr);
     }
 
-    printf("Waiting for Local DNS Server...\n");
+    // waiting for local DNS server's reply
     receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
-    printf("Received UDP packet:\n");
-    printInHex(sendBuffer, sendBufferUsed);
-
     handleReply();
   }
   }
   close(udpSock);
+}
+
+int main(int argc, char *argv[]) {
+  udpSock = createUDPSocket();
+
+  if (argc == 1) {
+    recursiveQuery();
+  } else if (argc == 3) {
+    oneTimeQuery(argc, argv);
+  } else {
+    printf("Invalid command!\n");
+  }
 }
