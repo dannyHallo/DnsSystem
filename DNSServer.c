@@ -26,40 +26,36 @@ void handleRequest() {
 
   printf("Answering to query: %s, query type: %s\n", dnsQueryParsed.domainName, queryTypeStr);
 
-  // step 1: find direct matches count
+  // step 1: check if there is at least one direct match
   char lineBuffer[100];
   int lineNum            = 0;
   int directMatchesFound = 0;
-  while (readLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
     char rrBuffer[100];
     parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
     if (!strcmp(rrBuffer, queryTypeStr)) {
       parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
       if (domainMatches(rrBuffer, dnsQueryParsed.domainName)) {
-        directMatchesFound++;
+        directMatchesFound = 1;
+        break;
       }
     }
   }
 
   if (directMatchesFound) {
-    printf("%d direct matches found\n", directMatchesFound);
-
     struct DNSHeader dnsHeader;
     struct DNSQuery dnsQuery;
     char encodedDomainNameBuffer1[100];
 
-    if (dnsQueryParsed.qtype == QUERY_TYPE_MX)
-      makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, FALSE, FALSE, 1, directMatchesFound, 0, directMatchesFound);
-    else
-      makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, FALSE, FALSE, 1, directMatchesFound, 0, 0);
-
     makeQuery(&dnsQuery, dnsQueryParsed.domainName, dnsQueryParsed.qtype, dnsQueryParsed.qclass, encodedDomainNameBuffer1,
               sizeof(encodedDomainNameBuffer1));
-    makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
+    makeSendBuffer(NULL, &dnsQuery, NULL);
 
-    // append answers
-    lineNum = 0;
-    while (readLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+    // append answers to send buffer
+    lineNum                    = 0;
+    int answersAdded           = 0;
+    int additionalRecordsAdded = 0;
+    while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
       char rrBuffer[100];
       parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
       if (!strcmp(rrBuffer, queryTypeStr)) {
@@ -80,7 +76,8 @@ void handleRequest() {
           makeResourceRecord(&dnsRR, dnsQueryParsed.domainName, resourceDataBufferPtr, dnsQueryParsed.qtype, decodedClass,
                              decodedTTL, encodedDomainNameBuffer2, sizeof(encodedDomainNameBuffer2), encodedResourceDataBuffer,
                              sizeof(encodedResourceDataBuffer));
-          appendResourceRecord(&dnsRR);
+          addResourceRecord(&dnsRR);
+          answersAdded++;
         }
       }
     }
@@ -88,24 +85,23 @@ void handleRequest() {
     // append additional records to MX data types
     if (dnsQueryParsed.qtype == QUERY_TYPE_MX) {
       lineNum = 0;
-      while (readLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+      while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
         char rrBuffer[100];
         parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
-        // if the line is a MX record
-        if (!strcmp(rrBuffer, queryTypeStr)) {
+        if (!strcmp(rrBuffer, "MX")) {
           char dnsDomainNameBuffer[100];
 
           // get the domain name of the MX record
           parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
+
           // if the domain name of the MX record matches the domain name of the query
           if (domainMatches(rrBuffer, dnsQueryParsed.domainName)) {
             parseResourceRecord(lineBuffer, RR_RDATA, dnsDomainNameBuffer, sizeof(dnsDomainNameBuffer));
 
             printf("Finding matching A record for this DNS domain name: %s\n", dnsDomainNameBuffer);
 
-            int matchedFound = 0;
-            int l            = 0;
-            while (readLine(fileName, lineBuffer, sizeof(lineBuffer), l++)) {
+            int l = 0;
+            while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), l++)) {
               parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
 
               // find corresponding A record of the this MX record
@@ -128,18 +124,20 @@ void handleRequest() {
                   makeResourceRecord(&dnsRR, dnsDomainNameBuffer, dnsServerIpBuffer, QUERY_TYPE_A, decodedClass, decodedTTL,
                                      encodedDomainNameBuffer2, sizeof(encodedDomainNameBuffer2), encodedResourceDataBuffer,
                                      sizeof(encodedResourceDataBuffer));
-                  appendResourceRecord(&dnsRR);
+                  addResourceRecord(&dnsRR);
 
-                  matchedFound++;
+                  additionalRecordsAdded++;
                 }
               }
             }
-
-            printf("%d matches found\n", matchedFound);
           }
         }
       }
     }
+
+    // make the header now, since we know how many answers and additional records we have
+    makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, FALSE, FALSE, 1, answersAdded, 0, additionalRecordsAdded);
+    changeDNSHeader(&dnsHeader);
 
     printf("Packet created:\n");
     printInHex(sendBuffer, sendBufferUsed);
@@ -152,7 +150,7 @@ void handleRequest() {
   lineNum               = 0;
   int nsDomainNameFound = 0;
   char nsDomainNameBuffer[100];
-  while (readLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
     char rrBuffer[100];
     parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
     if (!strcmp(rrBuffer, "NS")) {
@@ -184,7 +182,7 @@ void handleRequest() {
   int nsIpFound = 0;
   char nsIpBuffer[100];
   // step 3: find ip address of the DNS server by its domain name
-  while (readLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
     char rrBuffer[100];
     parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
     if (!strcmp(rrBuffer, "A")) {

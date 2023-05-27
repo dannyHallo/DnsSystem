@@ -220,7 +220,7 @@ void makeResourceRecord(struct DNSRR *dnsRR, const char *domainName, const char 
                         const int encodedDomainNameBufferSize, char *encodedResourceDataBuffer,
                         const int encodedResourceDataBufferSize);
 void makeSendBuffer(struct DNSHeader *dnsHeader, struct DNSQuery *dnsQuery, struct DNSRR *dnsRR);
-void appendResourceRecord(struct DNSRR *dnsRR);
+void addResourceRecord(struct DNSRR *dnsRR);
 
 uint16_t encodeDomainName(const char *domainName, char *buffer, const int bufferSize);
 uint16_t encodeIP(const char *ip, char *buffer, const int bufferSize);
@@ -234,7 +234,7 @@ int parseDNSQuery(struct DNSQuery *dnsQuery, char *domainNameBuffer, const int d
 int parseDNSRR(struct DNSRR *dnsRR, const int pointerOffset, char *domainNameBuffer, const int domainNameBufferSize,
                char *resourceDataBuffer, const int resourceDataBufferSize);
 void checkFileExistance(const char *fileName);
-int readLine(const char *fileName, char *lineBuffer, const int lineBufferSize, const int lineNum);
+int readResourceRecordLine(const char *fileName, char *lineBuffer, const int lineBufferSize, const int lineNum);
 void parseResourceRecord(const char *lineBuffer, const int resourceRecordType, char *rrBuffer, const int rrBufferSize);
 
 int domainContains(const char *rrOwner, const char *domainNameQueried);
@@ -325,14 +325,16 @@ void makeResourceRecord(struct DNSRR *dnsRR, const char *domainName, const char 
 
 const char spacingBuffer = 0;
 
-// construct the sendBuffer, dnsRR can be leaved as NULL, and be appended later by calling appendResourceRecord()
+// construct the sendBuffer, all parameters, except for dnsQuery, can be leaved as NULL freely
 void makeSendBuffer(struct DNSHeader *dnsHeader, struct DNSQuery *dnsQuery, struct DNSRR *dnsRR) {
   memset(sendBuffer, 0, SEND_BUFFER_SIZE);
 
   char *ptr = sendBuffer;
 
-  memcpy(ptr, dnsHeader, sizeof(*dnsHeader));
-  ptr += sizeof(*dnsHeader);
+  // dnsHeader can be leaved as null because it is in fixed size
+  if (dnsHeader)
+    memcpy(ptr, dnsHeader, sizeof(*dnsHeader));
+  ptr += sizeof(struct DNSHeader);
 
   //////////////////////////////////////
 
@@ -349,6 +351,7 @@ void makeSendBuffer(struct DNSHeader *dnsHeader, struct DNSQuery *dnsQuery, stru
   memcpy(ptr, &dnsQuery->qclass, sizeof(dnsQuery->qclass));
   ptr += sizeof(dnsQuery->qclass);
 
+  // dnsRR can be leaved as null because it is the last part of the packet, and can be appended later
   if (!dnsRR) {
     sendBufferUsed = ptr - sendBuffer;
     return;
@@ -381,7 +384,8 @@ void makeSendBuffer(struct DNSHeader *dnsHeader, struct DNSQuery *dnsQuery, stru
   sendBufferUsed = ptr - sendBuffer;
 }
 
-void appendResourceRecord(struct DNSRR *dnsRR) {
+// append a resource record to the sendBuffer
+void addResourceRecord(struct DNSRR *dnsRR) {
   char *ptr = sendBuffer + sendBufferUsed;
 
   memcpy(ptr, dnsRR->domainName, sizeof(char) * strlen(dnsRR->domainName));
@@ -407,6 +411,13 @@ void appendResourceRecord(struct DNSRR *dnsRR) {
   ptr += ntohs(dnsRR->resourceDataLength);
 
   sendBufferUsed = ptr - sendBuffer;
+}
+
+// change DNS header in the sendBuffer
+void changeDNSHeader(const struct DNSHeader *dnsHeader) {
+  char *ptr = sendBuffer;
+  memcpy(ptr, dnsHeader, sizeof(*dnsHeader));
+  ptr += sizeof(*dnsHeader);
 }
 
 void printInHex(const void *ptr, size_t size) {
@@ -695,21 +706,27 @@ int parseDNSRR(struct DNSRR *dnsRR, const int pointerOffset, char *domainNameBuf
 void checkFileExistance(const char *fileName) {
   char lineBufferTmp[100];
   // check if file exists
-  if (readLine(fileName, lineBufferTmp, sizeof(lineBufferTmp), 0) == -1) {
+  if (readResourceRecordLine(fileName, lineBufferTmp, sizeof(lineBufferTmp), 0) == -1) {
     printf("Error: File %s not found!\n", fileName);
     return;
   }
 }
 
 // returns -1 if file not found,returns 0 if line content is empty (maybe out of range)
-int readLine(const char *fileName, char *lineBuffer, const int lineBufferSize, const int lineNum) {
+int readLine(const char *fileName, char *lineBuffer, const int lineBufferSize, const int lineNum, const char *parentDir) {
   char pathToFile[100];
   memset(lineBuffer, 0, lineBufferSize);
   memset(pathToFile, 0, sizeof(pathToFile));
 
   FILE *fp;
-  strcpy(pathToFile, PATH_OF_RR);
-  strcat(pathToFile, fileName);
+
+  // if parentDir is null, then file is in current directory
+  if (!parentDir)
+    strcpy(pathToFile, fileName);
+  else {
+    strcpy(pathToFile, parentDir);
+    strcat(pathToFile, fileName);
+  }
 
   fp = fopen(pathToFile, "r");
 
@@ -740,6 +757,15 @@ int readLine(const char *fileName, char *lineBuffer, const int lineBufferSize, c
   // places unfilled specifically are just null terminators
   fclose(fp);
   return lineCursorPos != 0;
+}
+
+// returns -1 if file not found,returns 0 if line content is empty (maybe out of range)
+int readResourceRecordLine(const char *fileName, char *lineBuffer, const int lineBufferSize, const int lineNum) {
+  readLine(fileName, lineBuffer, lineBufferSize, lineNum, PATH_OF_RR);
+}
+
+int readCacheLine(const char *fileName, char *lineBuffer, const int lineBufferSize, const int lineNum) {
+  readLine(fileName, lineBuffer, lineBufferSize, lineNum, NULL);
 }
 
 void parseResourceRecord(const char *lineBuffer, const int resourceRecordType, char *rrBuffer, const int rrBufferSize) {

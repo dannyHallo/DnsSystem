@@ -2,15 +2,29 @@
 
 // http://zake7749.github.io/2015/03/17/SocketProgramming/ <- tutorial for TCP connections
 
-const char *ipAddress = "127.0.0.2";
-const char *fileName  = "rr2.txt";
-const char *cacheFile = "cache.txt";
+const char *ipAddress     = "127.0.0.2";
+const char *fileName      = "rr2.txt";
+const char *cacheFileName = "cache.txt";
 
 int udpSock, tcpSock;
 char sendBuffer2[SEND_BUFFER_SIZE];
 char sendBuffer3[SEND_BUFFER_SIZE];
 char clientIpAddress[20];
 unsigned short clientPort;
+
+// create the cache file if it doesn't exist
+void createCacheIfNotExists() {
+  FILE *cacheFile = fopen(cacheFileName, "a");
+  fclose(cacheFile);
+}
+
+// add a line to the cache file (to the tail of the file)
+void addCache(const char *lineToBeCached) {
+  // append line to the laast line of cache file
+  FILE *cacheFile = fopen(cacheFileName, "a");
+  fprintf(cacheFile, "%s\n", lineToBeCached);
+  fclose(cacheFile);
+}
 
 // handle queries sent from client
 void handleUDP() {
@@ -34,40 +48,56 @@ void handleUDP() {
   }
 
   char lineBuffer[100];
-  int lineNum          = 0;
-  int directMatchFound = 0;
+  int lineNum            = 0;
+  int directMatchesFound = 0;
 
-  // step 1: find direct match
-  while (readLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+  // step 1: find in cache
+  while (readCacheLine(cacheFileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+    printf("lineBuffer: %s\n", lineBuffer);
+
     char rrBuffer[100];
     parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
 
     if (!strcmp(rrBuffer, queryTypeStr)) {
       parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
       if (domainMatches(rrBuffer, dnsQueryParsed.domainName)) {
-        directMatchFound = 1;
+        directMatchesFound = 1;
         break;
       }
     }
   }
 
-  if (directMatchFound) {
+  printf("directMatchesFound\n");
+
+  if (directMatchesFound) {
     printf("Direct match found!\n");
-    // TODO: typically, direct A matches in local DNS server is in the cache file, handle this later
+    int lineNum = 0;
+    while (readResourceRecordLine(cacheFileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+      char rrBuffer[100];
+      parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
+
+      if (!strcmp(rrBuffer, queryTypeStr)) {
+        parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
+        if (domainMatches(rrBuffer, dnsQueryParsed.domainName)) {
+          break;
+        }
+      }
+    }
+    return; // TODO:
   }
+
+  printf("Direct match not found!\n");
 
   lineNum               = 0;
   int nsDomainNameFound = 0;
   char nsDomainNameBuffer[100];
   // step 2: find domain name of related DNS server
-  while (readLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
     char rrBuffer[100];
     parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
     if (!strcmp(rrBuffer, "NS")) {
       parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
-      int returnValue = domainContains(rrBuffer, dnsQueryParsed.domainName);
-
-      if (returnValue) {
+      if (domainContains(rrBuffer, dnsQueryParsed.domainName)) {
         parseResourceRecord(lineBuffer, RR_RDATA, nsDomainNameBuffer, sizeof(nsDomainNameBuffer));
         nsDomainNameFound = 1;
         break;
@@ -80,11 +110,13 @@ void handleUDP() {
     printf("WARNING: NO NS RECORD FOR ROOT SERVER! CHECK CONFIG!\n");
   }
 
+  printf("nsDomainNameBuffer: %s\n", nsDomainNameBuffer);
+
   lineNum       = 0;
   int nsIpFound = 0;
   char nsIpBuffer[100];
   // step 3: find ip of the root dns server
-  while (readLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
     char rrBuffer[100];
     parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
     if (!strcmp(rrBuffer, "A")) {
@@ -210,7 +242,7 @@ void handleTCP() {
 
         // load constructioning buffer
         memcpy(sendBuffer, sendBuffer3, SEND_BUFFER_SIZE);
-        appendResourceRecord(&dnsRR);
+        addResourceRecord(&dnsRR);
         // save constructioning buffer
         memcpy(sendBuffer3, sendBuffer, SEND_BUFFER_SIZE);
       }
@@ -244,6 +276,7 @@ void handleTCP() {
 
 int main() {
   checkFileExistance(fileName);
+  createCacheIfNotExists();
 
   udpSock = createUDPSocket();              // this is a server for UDP traffics
   tcpSock = createTCPSocket();              // this is a client for TCP traffics
