@@ -56,6 +56,12 @@ const uint16_t QUERY_TYPE_PTR   = 0x000c;
 
 const uint16_t QUERY_CLASS_IN = 0x0001; // indicates the internet system
 
+const uint16_t TAG_IS_QUERY_BIT = 1 << 15;
+const uint16_t TAG_IS_IQ_BIT    = 1 << 11;
+const uint16_t TAG_IS_AA_BIT    = 1 << 10;
+const uint16_t TAG_RD_BIT       = 1 << 8;
+const uint16_t TAG_RA_BIT       = 1 << 7;
+
 // the resource records are stored in rr files
 const int RR_OWNER = 0;
 const int RR_TTL   = 1;
@@ -146,9 +152,8 @@ void sendTCP(const int socket, const char *bufferToSend, const int sendSize) {
   // move bufferToSend to sendBufferTmp
   memcpy(ptr, bufferToSend, sendSize);
 
-  // print sendBufferTmp
-  printf("packing up sending buffer: ");
-  printInHex(sendBufferTmp, sendSize + 2);
+  // printf("packing up sending buffer: ");
+  // printInHex(sendBufferTmp, sendSize + 2);
 
   send(socket, sendBufferTmp, sendSize + 2, 0);
 }
@@ -199,8 +204,8 @@ void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize, i
 
   memcpy(bufferToReceive, sendBufferTmp + 2, sendBufferUsed);
 
-  printf("unpacking received buffer: ");
-  printInHex(bufferToReceive, sendBufferUsed);
+  // printf("unpacking received buffer: ");
+  // printInHex(bufferToReceive, sendBufferUsed);
 
   if (receivedFromAddressBuffer != NULL)
     strcpy(receivedFromAddressBuffer, inet_ntoa(receivedFromAddr.sin_addr));
@@ -211,8 +216,9 @@ void receiveTCP(const int socket, char *bufferToReceive, const int bufferSize, i
 // --------------------------------------------------------------------------------------------
 
 uint16_t getRandomID();
-void makeHeader(struct DNSHeader *dnsHeader, uint16_t id, uint16_t isQuery, uint16_t useRecursive, uint16_t recursiveAvailable,
-                uint16_t questionCount, uint16_t answerCount, uint16_t authorCount, uint16_t additionalCount);
+void makeHeader(struct DNSHeader *dnsHeader, uint16_t id, uint8_t isQuery, uint8_t isStandardQuery, uint8_t isAuthoritativeAnswer,
+                uint8_t useRecusive, uint8_t recursiveAvailable, uint16_t questionCount, uint16_t answerCount,
+                uint16_t authorCount, uint16_t additionalCount);
 void makeQuery(struct DNSQuery *dnsQuery, const char *domainName, const uint16_t queryType, const uint16_t queryClass,
                char *encodedDomainNameBuffer, const int encodedDomainNameBufferSize);
 void makeResourceRecord(struct DNSRR *dnsRR, const char *domainName, const char *resourceData, const uint16_t queryType,
@@ -240,15 +246,12 @@ void parseResourceRecord(const char *lineBuffer, const int resourceRecordType, c
 int domainContains(const char *rrOwner, const char *domainNameQueried);
 int domainMatches(const char *rrOwner, const char *domainNameQueried);
 
-unsigned int seedUsed = 0;
-
 // local function: constructs the ID field inside a DNS header with a random number
-uint16_t getRandomID() {
-  srand(seedUsed++);
-
+uint16_t getRandomID(int *seed) {
   uint16_t id = 0;
   int i;
   for (i = 0; i < 16; ++i) {
+    srand(*(seed++));
     int r = rand() % 2;
     id |= (r << i);
   }
@@ -258,25 +261,34 @@ uint16_t getRandomID() {
 
 // local function: constructs the TAG field inside a DNS header, recursiveAvailable bit will only be turned on if the packet is a
 // response
-uint16_t makeTag(uint16_t isQuery, uint16_t useRecusive, uint16_t recursiveAvailable) {
+uint16_t makeTag(uint8_t isQuery, uint8_t isStandardQuery, uint8_t isAuthoritativeAnswer, uint8_t useRecusive,
+                 uint8_t recursiveAvailable) {
   uint16_t tag = 0;
-  if (useRecusive)
-    tag |= (1 << 8); // set recursion desired bit
 
-  // if the header is a request
-  if (!isQuery) {
-    tag |= (1 << 15); // set bit to response
-    if (recursiveAvailable)
-      tag |= (1 << 7); // set recursion available bit
-  }
+  if (!isQuery)
+    tag |= TAG_IS_QUERY_BIT; // set query bit
+
+  if (!isStandardQuery)
+    tag |= TAG_IS_IQ_BIT; // set standard query bit
+
+  if (isAuthoritativeAnswer)
+    tag |= TAG_IS_AA_BIT; // set authoritative answer bit
+
+  if (useRecusive)
+    tag |= TAG_RD_BIT; // set recursive bit
+
+  if (recursiveAvailable)
+    tag |= TAG_RA_BIT; // set recursive available bit
+
   return tag;
 }
 
 // constructs a DNS header
-void makeHeader(struct DNSHeader *dnsHeader, uint16_t id, uint16_t isQuery, uint16_t useRecursive, uint16_t recursiveAvailable,
-                uint16_t questionCount, uint16_t answerCount, uint16_t authorCount, uint16_t additionalCount) {
+void makeHeader(struct DNSHeader *dnsHeader, uint16_t id, uint8_t isQuery, uint8_t isStandardQuery, uint8_t isAuthoritativeAnswer,
+                uint8_t useRecusive, uint8_t recursiveAvailable, uint16_t questionCount, uint16_t answerCount,
+                uint16_t authorCount, uint16_t additionalCount) {
   dnsHeader->id              = htons(id);
-  dnsHeader->tag             = htons(makeTag(isQuery, useRecursive, recursiveAvailable));
+  dnsHeader->tag             = htons(makeTag(isQuery, isStandardQuery, isAuthoritativeAnswer, useRecusive, recursiveAvailable));
   dnsHeader->questionCount   = htons(questionCount);
   dnsHeader->answerCount     = htons(answerCount);
   dnsHeader->authorCount     = htons(authorCount);
@@ -768,6 +780,7 @@ int readCacheLine(const char *fileName, char *lineBuffer, const int lineBufferSi
   readLine(fileName, lineBuffer, lineBufferSize, lineNum, NULL);
 }
 
+// fill rrBuffer with the resource record of type resourceRecordType, found on the line given by lineBuffer
 void parseResourceRecord(const char *lineBuffer, const int resourceRecordType, char *rrBuffer, const int rrBufferSize) {
   const char *ptr = lineBuffer - 1;
   int cursorPos   = 0;
@@ -783,6 +796,46 @@ void parseResourceRecord(const char *lineBuffer, const int resourceRecordType, c
       rrBuffer[cursorPos++] = *ptr;
     }
   }
+}
+
+// construct a line of resource record from the given parameters
+void constructResourceRecordLine(const struct DNSRR *dnsRR, char *lineBuffer, const int lineBufferSize) {
+  const char *rrOwner = dnsRR->domainName;
+
+  char rrType[10];
+  memset(rrType, 0, sizeof(rrType));
+  if (dnsRR->qtype == QUERY_TYPE_A) {
+    strcpy(rrType, "A");
+  } else if (dnsRR->qtype == QUERY_TYPE_CNAME) {
+    strcpy(rrType, "CNAME");
+  } else if (dnsRR->qtype == QUERY_TYPE_MX) {
+    strcpy(rrType, "MX");
+  } else if (dnsRR->qtype == QUERY_TYPE_PTR) {
+    strcpy(rrType, "PTR");
+  } else {
+    printf("Error: unsupported RR type\n");
+  }
+
+  const char rrClass[10] = "IN";
+
+  char rrTTL[10];
+  memset(rrTTL, 0, sizeof(rrTTL));
+  itoa(dnsRR->ttl, rrTTL);
+
+  const char *rrData = dnsRR->resourceData;
+
+  // construct line in this format:
+  // rrOwner rrTTL rrClass rrType rrData
+  memset(lineBuffer, 0, lineBufferSize);
+  strcpy(lineBuffer, rrOwner);
+  strcat(lineBuffer, " ");
+  strcat(lineBuffer, rrTTL);
+  strcat(lineBuffer, " ");
+  strcat(lineBuffer, rrClass);
+  strcat(lineBuffer, " ");
+  strcat(lineBuffer, rrType);
+  strcat(lineBuffer, " ");
+  strcat(lineBuffer, rrData);
 }
 
 // neither string should be empty! both domain names are allowd to be ended with dot

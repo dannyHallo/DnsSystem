@@ -6,11 +6,11 @@ alt3.aspmx.l.google.com. 86400 IN A 64.233.171.26
 alt4.aspmx.l.google.com. 86400 IN A 142.250.152.26
 aspmx.l.google.com. 86400 IN A 74.125.204.26
 proog.blender.org. 86400 IN A 82.94.213.219
-github.com 86400 IN MX alt1.aspmx.l.google.com.
-github.com 86400 IN MX alt2.aspmx.l.google.com.
-github.com 86400 IN MX alt3.aspmx.l.google.com.
-github.com 86400 IN MX alt4.aspmx.l.google.com.
-github.com 86400 IN MX aspmx.l.google.com.
+github.com. 86400 IN MX alt1.aspmx.l.google.com.
+github.com. 86400 IN MX alt2.aspmx.l.google.com.
+github.com. 86400 IN MX alt3.aspmx.l.google.com.
+github.com. 86400 IN MX alt4.aspmx.l.google.com.
+github.com. 86400 IN MX aspmx.l.google.com.
 blender.org. 86400 IN MX alt1.aspmx.l.google.com.
 blender.org. 86400 IN MX alt2.aspmx.l.google.com.
 blender.org. 86400 IN MX alt3.aspmx.l.google.com.

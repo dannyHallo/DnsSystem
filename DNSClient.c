@@ -1,4 +1,3 @@
-// TODO: cache
 // TODO: PTR record
 // TODO: print trace
 
@@ -6,6 +5,7 @@
 
 const char *ipAddress = "127.0.0.1";
 int udpSock;
+int seed = 2147483647;
 
 void DNSRequest(const uint16_t queryType, const char *queryContent) {
   printf("Processing user query: %s\n", queryContent);
@@ -13,7 +13,7 @@ void DNSRequest(const uint16_t queryType, const char *queryContent) {
   {
     char domainNameBuffer[200];
     struct DNSHeader dnsHeader;
-    makeHeader(&dnsHeader, getRandomID(), TRUE, TRUE, FALSE, 1, 0, 0, 0);
+    makeHeader(&dnsHeader, getRandomID(&seed), TRUE, TRUE, FALSE, TRUE, FALSE, 1, 0, 0, 0);
     struct DNSQuery dnsQuery;
     makeQuery(&dnsQuery, queryContent, queryType, QUERY_CLASS_IN, domainNameBuffer, sizeof(domainNameBuffer));
     makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
@@ -40,7 +40,13 @@ void handleReply() {
 
   // answer found
   if (dnsHeaderParsed.answerCount > 0) {
-    printf("\nAuthoritative answer: \n");
+    uint16_t isAuthoritiveAnswer = dnsHeaderParsed.tag & TAG_IS_AA_BIT;
+
+    if (isAuthoritiveAnswer) {
+      printf("\nAuthoritative answer: \n");
+    } else {
+      printf("\nNon-authoritative answer: \n");
+    }
 
     int i;
     for (i = 0; i < dnsHeaderParsed.answerCount + dnsHeaderParsed.additionalCount; ++i) {
@@ -105,7 +111,7 @@ void oneTimeQuery(int argc, char *argv[]) {
 // 1. set type=queryType queryName
 // 2. queryName (using previous queryType) (default queryType=MX)
 void recursiveQuery() {
-  uint16_t queryType = QUERY_TYPE_MX;
+  uint16_t queryType = QUERY_TYPE_A;
 
   printf("DNSClient Started\n");
   for (;;) {

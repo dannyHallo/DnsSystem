@@ -26,8 +26,214 @@ void addCache(const char *lineToBeCached) {
   fclose(cacheFile);
 }
 
-// handle queries sent from client
-void handleUDP() {
+// if direct match is found, send back to Local DNS Server, return 1, else return 0
+int findDirectMatch(const struct DNSHeader *dnsHeaderParsed, const struct DNSQuery *dnsQueryParsed) {
+  // convert query type to string
+  char queryTypeStr[10];
+  memset(queryTypeStr, 0, sizeof(queryTypeStr));
+  if (dnsQueryParsed->qtype == QUERY_TYPE_A) {
+    strcpy(queryTypeStr, "A");
+  } else if (dnsQueryParsed->qtype == QUERY_TYPE_MX) {
+    strcpy(queryTypeStr, "MX");
+  } else if (dnsQueryParsed->qtype == QUERY_TYPE_CNAME) {
+    strcpy(queryTypeStr, "CNAME");
+  } else if (dnsQueryParsed->qtype == QUERY_TYPE_PTR) {
+    strcpy(queryTypeStr, "PTR");
+  }
+
+  printf("Answering to query: %s, query type: %s\n", dnsQueryParsed->domainName, queryTypeStr);
+  printf("Finding direct match...\n");
+
+  // try to find a direct match
+  int directMatchesFound = 0;
+  {
+    char lineBuffer[100];
+    int lineNum = 0;
+    while (readCacheLine(cacheFileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+      char rrBuffer[100];
+      parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
+      if (!strcmp(rrBuffer, queryTypeStr)) {
+        parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
+        if (domainMatches(rrBuffer, dnsQueryParsed->domainName)) {
+          directMatchesFound = 1;
+          break;
+        }
+      }
+    }
+  }
+  if (!directMatchesFound)
+    return 0;
+
+  struct DNSHeader dnsHeader;
+  struct DNSQuery dnsQuery;
+  char encodedDomainNameBuffer1[100];
+
+  makeQuery(&dnsQuery, dnsQueryParsed->domainName, dnsQueryParsed->qtype, dnsQueryParsed->qclass, encodedDomainNameBuffer1,
+            sizeof(encodedDomainNameBuffer1));
+  makeSendBuffer(NULL, &dnsQuery, NULL);
+
+  // append answers to send buffer
+  int lineNum                = 0;
+  int answersAdded           = 0;
+  int additionalRecordsAdded = 0;
+  char lineBuffer[100];
+  while (readCacheLine(cacheFileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+    char rrBuffer[100];
+    printf("Checking line: %s\n", lineBuffer);
+
+    parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
+    if (!strcmp(rrBuffer, queryTypeStr)) {
+      struct DNSRR dnsRR;
+      char resourceDataBuffer[100];
+      char encodedDomainNameBuffer2[100];
+      char encodedResourceDataBuffer[100];
+
+      parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
+      if (domainMatches(rrBuffer, dnsQueryParsed->domainName)) {
+        parseResourceRecord(lineBuffer, RR_TTL, rrBuffer, sizeof(rrBuffer));
+        uint32_t decodedTTL = decodeTTL(rrBuffer);
+        parseResourceRecord(lineBuffer, RR_CLASS, rrBuffer, sizeof(rrBuffer));
+        uint16_t decodedClass = decodeClass(rrBuffer); // this should always be in class IN (internet)
+        parseResourceRecord(lineBuffer, RR_RDATA, resourceDataBuffer, sizeof(resourceDataBuffer));
+        char *resourceDataBufferPtr = resourceDataBuffer;
+
+        makeResourceRecord(&dnsRR, dnsQueryParsed->domainName, resourceDataBufferPtr, dnsQueryParsed->qtype, decodedClass,
+                           decodedTTL, encodedDomainNameBuffer2, sizeof(encodedDomainNameBuffer2), encodedResourceDataBuffer,
+                           sizeof(encodedResourceDataBuffer));
+        addResourceRecord(&dnsRR);
+        answersAdded++;
+      }
+    }
+  }
+
+  // append additional records to MX data types
+  if (dnsQueryParsed->qtype == QUERY_TYPE_MX) {
+    lineNum = 0;
+    while (readCacheLine(cacheFileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+      char rrBuffer[100];
+      parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
+      if (!strcmp(rrBuffer, "MX")) {
+        char dnsDomainNameBuffer[100];
+
+        // get the domain name of the MX record
+        parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
+
+        // if the domain name of the MX record matches the domain name of the query
+        if (domainMatches(rrBuffer, dnsQueryParsed->domainName)) {
+          parseResourceRecord(lineBuffer, RR_RDATA, dnsDomainNameBuffer, sizeof(dnsDomainNameBuffer));
+
+          // printf("Finding matching A record for this DNS domain name: %s\n", dnsDomainNameBuffer);
+
+          int l = 0;
+          while (readCacheLine(cacheFileName, lineBuffer, sizeof(lineBuffer), l++)) {
+            parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
+
+            // find corresponding A record of the this MX record
+            if (!strcmp(rrBuffer, "A")) {
+              parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
+
+              // if the owner of the A record matches the data of the MX record
+              if (domainMatches(rrBuffer, dnsDomainNameBuffer)) {
+                struct DNSRR dnsRR;
+                char dnsServerIpBuffer[100];
+                char encodedDomainNameBuffer2[100];
+                char encodedResourceDataBuffer[100];
+
+                parseResourceRecord(lineBuffer, RR_TTL, rrBuffer, sizeof(rrBuffer));
+                uint32_t decodedTTL = decodeTTL(rrBuffer);
+                parseResourceRecord(lineBuffer, RR_CLASS, rrBuffer, sizeof(rrBuffer));
+                uint16_t decodedClass = decodeClass(rrBuffer); // this should always be in class IN (internet)
+                parseResourceRecord(lineBuffer, RR_RDATA, dnsServerIpBuffer, sizeof(dnsServerIpBuffer));
+
+                makeResourceRecord(&dnsRR, dnsDomainNameBuffer, dnsServerIpBuffer, QUERY_TYPE_A, decodedClass, decodedTTL,
+                                   encodedDomainNameBuffer2, sizeof(encodedDomainNameBuffer2), encodedResourceDataBuffer,
+                                   sizeof(encodedResourceDataBuffer));
+                addResourceRecord(&dnsRR);
+
+                additionalRecordsAdded++;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // make the header now, since we know how many answers and additional records we have
+  makeHeader(&dnsHeader, dnsHeaderParsed->id, FALSE, TRUE, FALSE, TRUE, TRUE, 1, answersAdded, 0, additionalRecordsAdded);
+  changeDNSHeader(&dnsHeader);
+
+  printf("Direct match found in cache, sending back to client...\n");
+  sendUDP(udpSock, clientIpAddress, clientPort, sendBuffer, sendBufferUsed);
+  return 1;
+}
+
+// if next hop is found, send back to Local DNS Server, return 1, else return 0
+int findNextHop(const struct DNSHeader *dnsHeaderParsed, const struct DNSQuery *dnsQueryParsed) {
+  printf("Finding next hop...\n");
+
+  int lineNum                = 0;
+  int nextHopDomainNameFound = 0;
+  char lineBuffer[100];
+  char nsDomainNameBuffer[100];
+  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+    char rrBuffer[100];
+    parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
+    if (!strcmp(rrBuffer, "NS")) {
+      parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
+      if (domainContains(rrBuffer, dnsQueryParsed->domainName)) {
+        parseResourceRecord(lineBuffer, RR_RDATA, nsDomainNameBuffer, sizeof(nsDomainNameBuffer));
+        nextHopDomainNameFound = 1;
+        break;
+      }
+    }
+  }
+
+  if (!nextHopDomainNameFound) {
+    return 0;
+  }
+
+  lineNum            = 0;
+  int nextHopIpFound = 0;
+  char nextHopIpBuffer[100];
+  // step 3: find ip address of the DNS server by its domain name
+  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
+    char rrBuffer[100];
+    parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
+    if (!strcmp(rrBuffer, "A")) {
+      parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
+      if (domainMatches(rrBuffer, nsDomainNameBuffer)) {
+        parseResourceRecord(lineBuffer, RR_RDATA, nextHopIpBuffer, sizeof(nextHopIpBuffer));
+        nextHopIpFound = 1;
+        break;
+      }
+    }
+  }
+
+  if (!nextHopIpFound)
+    printf("Warning: No A record for root server! Check config!\n");
+
+  // query to another DNS server
+  {
+    struct DNSHeader dnsHeader;
+    struct DNSQuery dnsQuery;
+    char encodedDomainNameBuffer[100];
+
+    makeHeader(&dnsHeader, dnsHeaderParsed->id, TRUE, TRUE, FALSE, FALSE, FALSE, 1, 0, 0, 0);
+    makeQuery(&dnsQuery, dnsQueryParsed->domainName, dnsQueryParsed->qtype, dnsQueryParsed->qclass, encodedDomainNameBuffer,
+              sizeof(encodedDomainNameBuffer));
+    makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
+  }
+  // connect with DNS server
+  printf("Connecting to %s:%d\n", nextHopIpBuffer, DNS_PORT);
+  connectSocket(tcpSock, nextHopIpBuffer, DNS_PORT);
+
+  sendTCP(tcpSock, sendBuffer, sendBufferUsed);
+  return 1;
+}
+
+// handle queries sent from client, return 1 if cache is found, else return 0
+int handleUDP() {
   struct DNSHeader dnsHeaderParsed;
   struct DNSQuery dnsQueryParsed;
   char domainNameBuffer[100];
@@ -35,125 +241,13 @@ void handleUDP() {
   parseDNSHeader(&dnsHeaderParsed);
   parseDNSQuery(&dnsQueryParsed, domainNameBuffer, sizeof(domainNameBuffer));
 
-  char queryTypeStr[10];
-  memset(queryTypeStr, 0, sizeof(queryTypeStr));
-  if (dnsQueryParsed.qtype == QUERY_TYPE_A) {
-    strcpy(queryTypeStr, "A");
-  } else if (dnsQueryParsed.qtype == QUERY_TYPE_MX) {
-    strcpy(queryTypeStr, "MX");
-  } else if (dnsQueryParsed.qtype == QUERY_TYPE_CNAME) {
-    strcpy(queryTypeStr, "CNAME");
-  } else if (dnsQueryParsed.qtype == QUERY_TYPE_PTR) {
-    strcpy(queryTypeStr, "PTR");
-  }
+  if (findDirectMatch(&dnsHeaderParsed, &dnsQueryParsed))
+    return 1;
 
-  char lineBuffer[100];
-  int lineNum            = 0;
-  int directMatchesFound = 0;
+  if (findNextHop(&dnsHeaderParsed, &dnsQueryParsed))
+    return 0;
 
-  // step 1: find in cache
-  while (readCacheLine(cacheFileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
-    printf("lineBuffer: %s\n", lineBuffer);
-
-    char rrBuffer[100];
-    parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
-
-    if (!strcmp(rrBuffer, queryTypeStr)) {
-      parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
-      if (domainMatches(rrBuffer, dnsQueryParsed.domainName)) {
-        directMatchesFound = 1;
-        break;
-      }
-    }
-  }
-
-  printf("directMatchesFound\n");
-
-  if (directMatchesFound) {
-    printf("Direct match found!\n");
-    int lineNum = 0;
-    while (readResourceRecordLine(cacheFileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
-      char rrBuffer[100];
-      parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
-
-      if (!strcmp(rrBuffer, queryTypeStr)) {
-        parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
-        if (domainMatches(rrBuffer, dnsQueryParsed.domainName)) {
-          break;
-        }
-      }
-    }
-    return; // TODO:
-  }
-
-  printf("Direct match not found!\n");
-
-  lineNum               = 0;
-  int nsDomainNameFound = 0;
-  char nsDomainNameBuffer[100];
-  // step 2: find domain name of related DNS server
-  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
-    char rrBuffer[100];
-    parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
-    if (!strcmp(rrBuffer, "NS")) {
-      parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
-      if (domainContains(rrBuffer, dnsQueryParsed.domainName)) {
-        parseResourceRecord(lineBuffer, RR_RDATA, nsDomainNameBuffer, sizeof(nsDomainNameBuffer));
-        nsDomainNameFound = 1;
-        break;
-      }
-    }
-  }
-
-  // the conguration file has some problem, check it now
-  if (!nsDomainNameFound) {
-    printf("WARNING: NO NS RECORD FOR ROOT SERVER! CHECK CONFIG!\n");
-  }
-
-  printf("nsDomainNameBuffer: %s\n", nsDomainNameBuffer);
-
-  lineNum       = 0;
-  int nsIpFound = 0;
-  char nsIpBuffer[100];
-  // step 3: find ip of the root dns server
-  while (readResourceRecordLine(fileName, lineBuffer, sizeof(lineBuffer), lineNum++)) {
-    char rrBuffer[100];
-    parseResourceRecord(lineBuffer, RR_TYPE, rrBuffer, sizeof(rrBuffer));
-    if (!strcmp(rrBuffer, "A")) {
-      parseResourceRecord(lineBuffer, RR_OWNER, rrBuffer, sizeof(rrBuffer));
-      if (domainMatches(rrBuffer, nsDomainNameBuffer)) {
-        parseResourceRecord(lineBuffer, RR_RDATA, nsIpBuffer, sizeof(nsIpBuffer));
-        nsIpFound = 1;
-        break;
-      }
-    }
-  }
-
-  // the conguration file has some problem, check it now
-  if (!nsIpFound) {
-    printf("WARNING: NO NS RECORD FOR ROOT SERVER! CHECK CONFIG!\n");
-  }
-
-  // query to another DNS server
-  if (dnsHeaderParsed.answerCount == 0) {
-    struct DNSHeader dnsHeader;
-    struct DNSQuery dnsQuery;
-    struct DNSRR dnsRR;
-    char encodedDomainNameBuffer[100];
-
-    makeHeader(&dnsHeader, dnsHeaderParsed.id, TRUE, FALSE, FALSE, 1, 0, 0, 0);
-    makeQuery(&dnsQuery, dnsQueryParsed.domainName, dnsQueryParsed.qtype, dnsQueryParsed.qclass, encodedDomainNameBuffer,
-              sizeof(encodedDomainNameBuffer));
-    makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
-  }
-
-  printf("Next hop address found\n");
-
-  // connect with DNS server
-  printf("Connecting to %s:%d\n", nsIpBuffer, DNS_PORT);
-  connectSocket(tcpSock, nsIpBuffer, DNS_PORT);
-
-  sendTCP(tcpSock, sendBuffer, sendBufferUsed);
+  printf("ERROR: No next hop found!\n");
 }
 
 // handle queries sent from other DNS servers, decide whether to send to client or to another DNS server
@@ -187,7 +281,7 @@ void handleTCP() {
       struct DNSQuery dnsQuery;
       char encodedDomainNameBuffer[100];
 
-      makeHeader(&dnsHeader, dnsHeaderParsed.id, TRUE, FALSE, FALSE, 1, 0, 0, 0);
+      makeHeader(&dnsHeader, dnsHeaderParsed.id, TRUE, TRUE, FALSE, FALSE, FALSE, 1, 0, 0, 0);
       makeQuery(&dnsQuery, dnsQueryParsed.domainName, dnsQueryParsed.qtype, dnsQueryParsed.qclass, encodedDomainNameBuffer,
                 sizeof(encodedDomainNameBuffer));
       makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
@@ -213,7 +307,7 @@ void handleTCP() {
       memcpy(sendBuffer2, sendBuffer, SEND_BUFFER_SIZE);
 
       // update sendBuffer for sending
-      makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, TRUE, TRUE, 1, dnsHeaderParsed.answerCount, 0,
+      makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, TRUE, TRUE, TRUE, TRUE, 1, dnsHeaderParsed.answerCount, 0,
                  dnsHeaderParsed.additionalCount);
       makeQuery(&dnsQuery, dnsQueryParsed.domainName, dnsQueryParsed.qtype, dnsQueryParsed.qclass, encodedDomainNameBuffer1,
                 sizeof(encodedDomainNameBuffer1));
@@ -233,6 +327,11 @@ void handleTCP() {
         pointerOffset = parseDNSRR(&dnsRRParsed, pointerOffset, domainNameBuffer2, sizeof(domainNameBuffer2), resourceDataBuffer,
                                    sizeof(resourceDataBuffer));
 
+        // add dns rr line to cache
+        char cachedLine[100];
+        constructResourceRecordLine(&dnsRRParsed, cachedLine, sizeof(cachedLine));
+        addCache(cachedLine); // add to cache
+
         struct DNSRR dnsRR;
         char encodedDomainNameBuffer2[100];
         char encodedResourceDataBuffer[100];
@@ -248,8 +347,8 @@ void handleTCP() {
       }
 
       // send to client
-      printf("Sending response:\n");
-      printInHex(sendBuffer, sendBufferUsed);
+      // printf("Sending response:\n");
+      // printInHex(sendBuffer, sendBufferUsed);
       sendUDP(udpSock, clientIpAddress, clientPort, sendBuffer, sendBufferUsed);
       return;
     }
@@ -261,7 +360,7 @@ void handleTCP() {
         struct DNSQuery dnsQuery;
         char encodedDomainNameBuffer[100];
 
-        makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, TRUE, TRUE, 1, 0, 0, 0);
+        makeHeader(&dnsHeader, dnsHeaderParsed.id, FALSE, TRUE, TRUE, TRUE, TRUE, 1, 0, 0, 0);
         makeQuery(&dnsQuery, dnsQueryParsed.domainName, dnsQueryParsed.qtype, dnsQueryParsed.qclass, encodedDomainNameBuffer,
                   sizeof(encodedDomainNameBuffer));
         makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
@@ -288,7 +387,8 @@ int main() {
     printf("\nWaiting for client...\n");
     receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, clientIpAddress, sizeof(clientIpAddress), &clientPort);
 
-    handleUDP();
+    if (handleUDP())
+      continue;
 
     printf("\nWaiting for dns server...\n");
     handleTCP();
