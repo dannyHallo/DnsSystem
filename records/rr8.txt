@@ -1,0 +1,5 @@
+166.243.205.20.in-addr.arpa. 86400 IN PTR github.com.
+104.226.94.82.in-addr.arpa. 86400 IN PTR blender.org.
+98.16.23.161.in-addr.arpa. 86400 IN PTR qmul.ac.uk.
+98.64.23.161.in-addr.arpa. 86400 IN PTR qmul.ac.uk.
+58.2.8.147.in-addr.arpa. 86400 IN PTR hku.hk.

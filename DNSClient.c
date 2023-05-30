@@ -1,4 +1,3 @@
-// TODO: PTR record
 // TODO: print trace
 
 #include "global.h"
@@ -7,6 +6,16 @@ const char *ipAddress = "127.0.0.1";
 int udpSock;
 int seed = 2147483647;
 
+void makeQueryContent(const char *originalQueryContent, char *queryContentBuffer, const int queryContentBufferSize) {
+  // Split the IP address into octets
+  int octets[4];
+  sscanf(originalQueryContent, "%d.%d.%d.%d", &octets[0], &octets[1], &octets[2], &octets[3]);
+
+  // Generate the PTR query string in reverse order
+  snprintf(queryContentBuffer, queryContentBufferSize, "%d.%d.%d.%d.in-addr.arpa", octets[3], octets[2], octets[1], octets[0]);
+}
+
+// send request to local DNS server
 void DNSRequest(const uint16_t queryType, const char *queryContent) {
   printf("Processing user query: %s\n", queryContent);
 
@@ -15,7 +24,17 @@ void DNSRequest(const uint16_t queryType, const char *queryContent) {
     struct DNSHeader dnsHeader;
     makeHeader(&dnsHeader, getRandomID(&seed), TRUE, TRUE, FALSE, TRUE, FALSE, 1, 0, 0, 0);
     struct DNSQuery dnsQuery;
-    makeQuery(&dnsQuery, queryContent, queryType, QUERY_CLASS_IN, domainNameBuffer, sizeof(domainNameBuffer));
+
+    char realQueryContent[100];
+    memset(realQueryContent, 0, sizeof(realQueryContent));
+    if (queryType == QUERY_TYPE_PTR) {
+      makeQueryContent(queryContent, realQueryContent, sizeof(realQueryContent));
+    } else {
+      strcpy(realQueryContent, queryContent);
+    }
+
+    printf("Query: %s\n", realQueryContent);
+    makeQuery(&dnsQuery, realQueryContent, queryType, QUERY_CLASS_IN, domainNameBuffer, sizeof(domainNameBuffer));
     makeSendBuffer(&dnsHeader, &dnsQuery, NULL);
   }
 
@@ -40,8 +59,8 @@ void handleReply() {
 
   // answer found
   if (dnsHeaderParsed.answerCount > 0) {
+    // check if it is an authoritive answer
     uint16_t isAuthoritiveAnswer = dnsHeaderParsed.tag & TAG_IS_AA_BIT;
-
     if (isAuthoritiveAnswer) {
       printf("\nAuthoritative answer: \n");
     } else {
@@ -61,7 +80,7 @@ void handleReply() {
       } else if (dnsQueryParsed.qtype == QUERY_TYPE_MX) {
         strcpy(answerNotice, "Mail exchange");
       } else if (dnsQueryParsed.qtype == QUERY_TYPE_PTR) {
-        strcpy(answerNotice, "Name server");
+        strcpy(answerNotice, "Name");
       } else {
         strcpy(answerNotice, "Unknown Type");
       }
@@ -111,7 +130,7 @@ void oneTimeQuery(int argc, char *argv[]) {
 // 1. set type=queryType queryName
 // 2. queryName (using previous queryType) (default queryType=MX)
 void recursiveQuery() {
-  uint16_t queryType = QUERY_TYPE_A;
+  uint16_t queryType = QUERY_TYPE_PTR;
 
   printf("DNSClient Started\n");
   for (;;) {

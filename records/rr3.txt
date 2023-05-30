@@ -2,5 +2,7 @@ uk. 86400 IN NS uk-hk.net.
 hk. 86400 IN NS uk-hk.net.
 com. 86400 IN NS com-org.net.
 org. 86400 IN NS com-org.net.
+in-addr.arpa. 86400 IN NS inv-lookup.net.
 uk-hk.net. 86400 IN A 127.0.0.4
 com-org.net. 86400 IN A 127.0.0.5
+inv-lookup.net. 86400 IN A 127.0.0.8

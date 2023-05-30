@@ -246,16 +246,15 @@ void parseResourceRecord(const char *lineBuffer, const int resourceRecordType, c
 int domainContains(const char *rrOwner, const char *domainNameQueried);
 int domainMatches(const char *rrOwner, const char *domainNameQueried);
 
-// local function: constructs the ID field inside a DNS header with a random number
 uint16_t getRandomID(int *seed) {
   uint16_t id = 0;
   int i;
+  srand(*seed);
   for (i = 0; i < 16; ++i) {
-    srand(*(seed++));
     int r = rand() % 2;
     id |= (r << i);
   }
-
+  (*seed)++;
   return id;
 }
 
@@ -315,14 +314,17 @@ void makeResourceRecord(struct DNSRR *dnsRR, const char *domainName, const char 
   dnsRR->qtype        = htons(queryType);
   dnsRR->qclass       = htons(queryClass);
   dnsRR->ttl          = htonl(ttl); // uint32_t, same as long
+
   if (queryType == QUERY_TYPE_A) {
     dnsRR->resourceDataLength = htons(encodeIP(resourceData, encodedResourceDataBuffer, encodedResourceDataBufferSize));
   }
   // cases when the bitcode represents encoded domain name
-  else if (queryType == QUERY_TYPE_CNAME) {
+  else if (queryType == QUERY_TYPE_CNAME || queryType == QUERY_TYPE_PTR) {
     uint16_t resourceDataLength = encodeDomainName(resourceData, encodedResourceDataBuffer, encodedResourceDataBufferSize);
     dnsRR->resourceDataLength   = htons(resourceDataLength);
-  } else if (queryType == QUERY_TYPE_MX) {
+  }
+  // a 2 bytes size of preference is needed for MX
+  else if (queryType == QUERY_TYPE_MX) {
     uint16_t preference            = 10;
     *(encodedResourceDataBuffer++) = (uint8_t)((preference >> 8) & 0x00ff);
     *(encodedResourceDataBuffer++) = (uint8_t)(preference & 0x00ff);
@@ -693,9 +695,8 @@ int parseDNSRR(struct DNSRR *dnsRR, const int pointerOffset, char *domainNameBuf
   if (dnsRR->qtype == QUERY_TYPE_A) {
     ptr = decodeIP(ptr, dnsRR->resourceDataLength, resourceDataBuffer, resourceDataBufferSize);
   }
-
   // cases when the bitcode represents encoded domain name
-  else if (dnsRR->qtype == QUERY_TYPE_CNAME) {
+  else if (dnsRR->qtype == QUERY_TYPE_CNAME || dnsRR->qtype == QUERY_TYPE_PTR) {
     int cursorPos           = 0;
     uint8_t subdomainLength = 0;
     --ptr;

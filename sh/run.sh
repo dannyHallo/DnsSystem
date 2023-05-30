@@ -20,9 +20,10 @@ case "$1" in
     7)
         ./DNSServer.out rr7.txt 127.0.0.7
         ;;
-    
-    *)
-        echo "Usage: $0 {1|2|3|4|5|6|7}"
-        exit 1
+    8)
+        ./DNSServer.out rr8.txt 127.0.0.8
+        ;;
+    else)
+        echo "Usage: $0 {1|2|3|4|5|6|7|8}"
         ;;
 esac

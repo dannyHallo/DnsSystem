@@ -254,10 +254,13 @@ int handleUDP() {
 void handleTCP() {
   for (;;) {
     receiveTCP(tcpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, NULL, 0, NULL);
-    // reset connection
+
+    // reset connection, and reuse the socket for another connection later
+    int reuse = 1;
+    setsockopt(tcpSock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
     close(tcpSock);
     tcpSock = createTCPSocket();
-    bindSocket(tcpSock, ipAddress, 5678); // we don't need to bind it to an local address and port for functionality
+    bindSocket(tcpSock, ipAddress, 5678); // FIXME:
 
     printf("Received TCP packet:\n");
     printInHex(sendBuffer, sendBufferUsed);
@@ -374,6 +377,7 @@ void handleTCP() {
 }
 
 int main() {
+  // the local config file must exist
   checkFileExistance(fileName);
   createCacheIfNotExists();
 
@@ -387,6 +391,7 @@ int main() {
     printf("\nWaiting for client...\n");
     receiveUDP(udpSock, sendBuffer, SEND_BUFFER_SIZE, NULL, clientIpAddress, sizeof(clientIpAddress), &clientPort);
 
+    // if we can find the answer in cache, we don't need to query to another DNS server
     if (handleUDP())
       continue;
 
